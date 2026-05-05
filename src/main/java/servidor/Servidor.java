@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Servidor {
 
-    // Mapa de clientes conectados: nombre -> handler
     static Map<String, ClienteHandler> clientesConectados = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
@@ -20,7 +19,6 @@ public class Servidor {
 
             while (true) {
                 Socket socket = servidor.accept();
-                // Cada cliente en su propio hilo
                 ClienteHandler handler = new ClienteHandler(socket);
                 new Thread(handler).start();
             }
@@ -30,7 +28,6 @@ public class Servidor {
         }
     }
 
-    // Genera nombre único para el cliente
     static synchronized String generarNombre(String nombreBase) {
         if (!clientesConectados.containsKey(nombreBase)) {
             return nombreBase;
@@ -42,7 +39,6 @@ public class Servidor {
         return nombreBase + i;
     }
 
-    // Envía mensaje a TODOS los clientes conectados
     static void broadcast(String mensaje, String emisor) {
         String texto = "[" + ahora() + "] *ALL " + emisor + ": " + mensaje;
         System.out.println("[BROADCAST] " + texto);
@@ -51,7 +47,6 @@ public class Servidor {
         }
     }
 
-    // Envía mensaje a un cliente específico
     static boolean enviarA(String destino, String mensaje, String emisor) {
         ClienteHandler destinatario = clientesConectados.get(destino);
         if (destinatario == null) return false;
@@ -81,11 +76,12 @@ class ClienteHandler implements Runnable {
     @Override
     public void run() {
         try {
-            entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            salida = new PrintWriter(socket.getOutputStream(), true);
+            // UTF-8 en entrada y salida para evitar signos de pregunta
+            entrada = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+            salida = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
 
-            // ── 1. Pedir nombre de usuario ──────────────────────────────
-            salida.println("Ingresá tu nombre de usuario:");
+            // 1. Pedir nombre de usuario
+            salida.println("Ingresa tu nombre de usuario:");
             String nombreBase = entrada.readLine();
             if (nombreBase == null || nombreBase.isBlank()) nombreBase = "Usuario";
             nombreBase = nombreBase.trim();
@@ -93,29 +89,27 @@ class ClienteHandler implements Runnable {
             nombre = Servidor.generarNombre(nombreBase);
             Servidor.clientesConectados.put(nombre, this);
 
-            // Avisar si el nombre fue modificado
             if (!nombre.equals(nombreBase)) {
-                salida.println("[SERVIDOR] El nombre '" + nombreBase + "' ya existe. Se te asignó: " + nombre);
+                salida.println("[SERVIDOR] El nombre '" + nombreBase + "' ya existe. Se te asigno: " + nombre);
             }
 
             System.out.println("[" + Servidor.ahora() + "] Cliente conectado: " + nombre
                     + " desde " + socket.getInetAddress().getHostAddress());
 
-            // ── 2. Menú de bienvenida ────────────────────────────────────
+            // 2. Menu de bienvenida
             enviarMenu();
 
             // Notificar al resto
-            Servidor.broadcast("¡" + nombre + " se conectó al chat!", "SERVIDOR");
+            Servidor.broadcast("!" + nombre + " se conecto al chat!", "SERVIDOR");
 
-            // ── 3. Bucle principal ───────────────────────────────────────
+            // 3. Bucle principal
             String mensaje;
             while ((mensaje = entrada.readLine()) != null) {
 
-                // LOG en consola del servidor
                 System.out.println("[" + Servidor.ahora() + "] " + nombre + ": " + mensaje);
 
                 if (mensaje.equalsIgnoreCase("SALIR")) {
-                    salida.println("[SERVIDOR] ¡Hasta luego, " + nombre + "!");
+                    salida.println("[SERVIDOR] Hasta luego, " + nombre + "!");
                     break;
 
                 } else if (mensaje.equalsIgnoreCase("AYUDA")) {
@@ -133,13 +127,10 @@ class ClienteHandler implements Runnable {
                     listarClientes();
 
                 } else if (mensaje.startsWith("*ALL ")) {
-                    // Mensaje a todos
                     String texto = mensaje.substring(5).trim();
                     Servidor.broadcast(texto, nombre);
 
                 } else if (mensaje.startsWith("*")) {
-                    // Mensaje privado: *NombreDestino mensaje
-                    // Puede ser uno o varios destinos: *Juan,Ana hola
                     int espacio = mensaje.indexOf(' ');
                     if (espacio == -1) {
                         salida.println("[SERVIDOR] Formato: *Destino mensaje  o  *Dest1,Dest2 mensaje");
@@ -167,47 +158,45 @@ class ClienteHandler implements Runnable {
                         int n = Integer.parseInt(mensaje.substring(4).trim());
                         salida.println("Resultado: " + (n % 2 == 0 ? "Es par" : "Es impar"));
                     } catch (NumberFormatException e) {
-                        salida.println("[ERROR] Ingresá un número válido.");
+                        salida.println("[ERROR] Ingresa un numero valido.");
                     }
 
                 } else {
-                    salida.println("[SERVIDOR] Comando no reconocido. Escribí AYUDA para ver los comandos.");
+                    salida.println("[SERVIDOR] Comando no reconocido. Escribe AYUDA para ver los comandos.");
                 }
             }
 
         } catch (IOException e) {
-            System.out.println("[" + Servidor.ahora() + "] Conexión perdida con: "
+            System.out.println("[" + Servidor.ahora() + "] Conexion perdida con: "
                     + (nombre != null ? nombre : "desconocido"));
         } finally {
             desconectar();
         }
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
-
     public void enviar(String mensaje) {
         salida.println(mensaje);
     }
 
     private void enviarMenu() {
-        salida.println("╔══════════════════════════════════════════╗");
-        salida.println("║     Bienvenido/a al Chat, " + nombre + "!");
-        salida.println("╠══════════════════════════════════════════╣");
-        salida.println("║  COMANDOS DISPONIBLES:                   ║");
-        salida.println("║  FECHA            → fecha y hora actual  ║");
-        salida.println("║  LISTA            → ver clientes online  ║");
-        salida.println("║  RESOLVE <expr>   → resolver matemática  ║");
-        salida.println("║  *ALL <msg>       → mensaje a todos      ║");
-        salida.println("║  *Nombre <msg>    → mensaje privado      ║");
-        salida.println("║  *N1,N2 <msg>     → mensaje a varios     ║");
-        salida.println("║  PAL <texto>      → detectar palíndromo  ║");
-        salida.println("║  MAYUS <texto>    → convertir mayúsculas ║");
-        salida.println("║  MINUS <texto>    → convertir minúsculas ║");
-        salida.println("║  REV <texto>      → invertir texto       ║");
-        salida.println("║  PAR <número>     → par o impar          ║");
-        salida.println("║  AYUDA            → mostrar este menú    ║");
-        salida.println("║  SALIR            → desconectarse        ║");
-        salida.println("╚══════════════════════════════════════════╝");
+        salida.println("+===========================================+");
+        salida.println("|     Bienvenido/a al Chat, " + nombre + "!");
+        salida.println("+-------------------------------------------+");
+        salida.println("|  COMANDOS DISPONIBLES:                    |");
+        salida.println("|  FECHA            -> fecha y hora actual  |");
+        salida.println("|  LISTA            -> ver clientes online  |");
+        salida.println("|  RESOLVE <expr>   -> resolver matematica  |");
+        salida.println("|  *ALL <msg>       -> mensaje a todos      |");
+        salida.println("|  *Nombre <msg>    -> mensaje privado      |");
+        salida.println("|  *N1,N2 <msg>     -> mensaje a varios     |");
+        salida.println("|  PAL <texto>      -> detectar palindromo  |");
+        salida.println("|  MAYUS <texto>    -> convertir mayusculas |");
+        salida.println("|  MINUS <texto>    -> convertir minusculas |");
+        salida.println("|  REV <texto>      -> invertir texto       |");
+        salida.println("|  PAR <numero>     -> par o impar          |");
+        salida.println("|  AYUDA            -> mostrar este menu    |");
+        salida.println("|  SALIR            -> desconectarse        |");
+        salida.println("+===========================================+");
     }
 
     private void listarClientes() {
@@ -219,18 +208,16 @@ class ClienteHandler implements Runnable {
     private void resolverExpresion(String expr) {
         try {
             double resultado = evaluar(expr);
-            // Mostrar sin decimales si es entero
             if (resultado == Math.floor(resultado)) {
                 salida.println("Resultado: " + (long) resultado);
             } else {
                 salida.println("Resultado: " + resultado);
             }
         } catch (Exception e) {
-            salida.println("[ERROR] No se pudo resolver la expresión: " + expr);
+            salida.println("[ERROR] No se pudo resolver la expresion: " + expr);
         }
     }
 
-    // Evaluador matemático sin ScriptEngine (compatible con Java 15+)
     private double evaluar(String expr) {
         return new Evaluador(expr.replaceAll("\\s+", "")).parse();
     }
@@ -238,9 +225,9 @@ class ClienteHandler implements Runnable {
     private void palindromo(String texto) {
         String inv = new StringBuilder(texto).reverse().toString();
         if (texto.equalsIgnoreCase(inv)) {
-            salida.println("Resultado: '" + texto + "' ES palíndromo");
+            salida.println("Resultado: '" + texto + "' ES palindromo");
         } else {
-            salida.println("Resultado: '" + texto + "' NO es palíndromo");
+            salida.println("Resultado: '" + texto + "' NO es palindromo");
         }
     }
 
@@ -251,14 +238,13 @@ class ClienteHandler implements Runnable {
         for (String dest : lista) {
             dest = dest.trim();
             if (dest.equalsIgnoreCase(nombre)) {
-                salida.println("[SERVIDOR] No podés mandarte un mensaje a vos mismo.");
+                salida.println("[SERVIDOR] No podes mandarte un mensaje a vos mismo.");
                 continue;
             }
             boolean ok = Servidor.enviarA(dest, texto, nombre);
             if (!ok) noEncontrados.add(dest);
         }
 
-        // Confirmar al emisor
         List<String> encontrados = new ArrayList<>(Arrays.asList(lista));
         encontrados.removeAll(noEncontrados);
         if (!encontrados.isEmpty()) {
@@ -267,21 +253,21 @@ class ClienteHandler implements Runnable {
         if (!noEncontrados.isEmpty()) {
             salida.println("[SERVIDOR] No se encontraron los siguientes usuarios: "
                     + String.join(", ", noEncontrados)
-                    + ". El mensaje fue enviado a los demás disponibles.");
+                    + ". El mensaje fue enviado a los demas disponibles.");
         }
     }
 
     private void desconectar() {
         if (nombre != null) {
             Servidor.clientesConectados.remove(nombre);
-            System.out.println("[" + Servidor.ahora() + "] " + nombre + " se desconectó.");
-            Servidor.broadcast(nombre + " se desconectó.", "SERVIDOR");
+            System.out.println("[" + Servidor.ahora() + "] " + nombre + " se desconecto.");
+            Servidor.broadcast(nombre + " se desconecto.", "SERVIDOR");
         }
         try { if (socket != null) socket.close(); } catch (IOException e) { /* ignorar */ }
     }
 }
 
-// Clase evaluador matemático (evita problemas de variables no-final en clases anónimas)
+
 class Evaluador {
     private final String expr;
     private int pos = -1, ch;
@@ -299,7 +285,7 @@ class Evaluador {
     double parse() {
         nextChar();
         double v = parseExpr();
-        if (pos < expr.length()) throw new RuntimeException("Expresión inválida");
+        if (pos < expr.length()) throw new RuntimeException("Expresion invalida");
         return v;
     }
 
